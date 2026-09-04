@@ -38,9 +38,13 @@ def compute_risk(mrz_result, tamper_result, face_match_score: float,
     else:
         reasons.append(f"No significant ELA irregularities (score {tamper_result.ela_score}/100)")
 
-    if tamper_result.metadata_flags:
-        score += 8
-        reasons.extend(tamper_result.metadata_flags)
+    # Missing EXIF is expected for scans, screenshots, and many messaging
+    # platforms. Show it to the reviewer, but do not turn it into a risk point.
+    # An explicit editing-software signature remains supporting evidence.
+    for flag in tamper_result.metadata_flags:
+        reasons.append(flag)
+        if "Editing software signature" in flag:
+            score += 8
 
     if face_match_score is None:
         reasons.append("Face match skipped (no live capture submitted)")

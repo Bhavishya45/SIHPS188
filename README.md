@@ -3,9 +3,9 @@
 
 This prototype has two parts. Both are real, not mocked demos.
 
-## 1. `dashboard.html` — Officer investigation console (open this)
+## 1. `dashboard.html` — Officer investigation console
 
-Just open it in any browser. No install needed.
+Open it in any browser to review the three embedded demonstration cases. To run a new document through OCR, MRZ validation, ELA, and the prototype face/reuse pipeline, start the local backend first.
 
 - **Case queue** on the left shows 3 documents that were run through the actual
   Python backend (`backend/`) — the OCR extraction, MRZ checksum validation,
@@ -17,8 +17,8 @@ Just open it in any browser. No install needed.
   - `reused_identity` — a different name/passport number, but the *same*
     face as the `clean` case, to demonstrate cross-case identity-reuse
     detection
-- **"+ New screening"** opens two tools that run for real, live, in your
-  browser (no server call):
+- **"+ New screening"** can call the local backend for a complete prototype
+  screening. It also includes two quick checks that run live in the browser:
   1. **MRZ checksum validator** — paste any 2-line MRZ and it validates
      every ICAO 9303 check digit on the spot.
   2. **Error Level Analysis** — upload any JPG/PNG and it re-encodes it on
@@ -45,12 +45,18 @@ Real, working, offline-testable code — not pseudocode:
 ### Run it yourself
 
 ```bash
+pip install -r requirements.txt
 cd backend
-pip install flask pillow pytesseract opencv-python numpy
-python3 generate_sample.py   # regenerate the 3 sample documents
-python3 demo.py              # run the full pipeline, print JSON reports
-python3 app.py                # or: start the REST API on localhost:5050
+python generate_sample.py     # regenerate the 3 sample documents
+python demo.py                # run the full pipeline, print JSON reports
+python app.py                 # start the REST API on localhost:5050
 ```
+
+Keep the backend running, then open `dashboard.html` and use **+ New
+screening**. Upload JPG or PNG document images up to 10 MB; a live photo is
+optional. Results are added only to the current browser session. The backend's
+prototype reuse store is `backend/cases_db.json`; delete it between demos if
+you want to reset the three-case sequence.
 
 ### Honest limitations (worth knowing before you present)
 
@@ -68,3 +74,6 @@ python3 app.py                # or: start the REST API on localhost:5050
 - **Database** is a flat JSON file standing in for the PostgreSQL store in
   the architecture diagram — same read/write pattern, different backing
   store for a fast prototype.
+- **Risk levels are decision-support signals, not automated decisions.** ELA
+  and the lightweight face similarity check must be reviewed by a human and
+  are not calibrated for operational use.

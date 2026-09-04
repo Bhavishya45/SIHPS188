@@ -69,12 +69,15 @@ def parse_td3(line1: str, line2: str) -> MRZResult:
     every checksum verified individually plus the composite check."""
     result = MRZResult()
 
-    if len(line1.strip()) < 5 or len(line2.strip()) < 5:
-        result.errors.append("MRZ lines too short / not detected")
+    raw_lines = [line1.strip().upper().replace(" ", ""), line2.strip().upper().replace(" ", "")]
+    if any(len(line) != 44 for line in raw_lines):
+        result.errors.append("TD3 MRZ must contain exactly two 44-character lines")
+        return result
+    if any(any(char not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<" for char in line) for line in raw_lines):
+        result.errors.append("MRZ contains characters outside the ICAO TD3 character set")
         return result
 
-    l1 = _clean_line(line1)
-    l2 = _clean_line(line2)
+    l1, l2 = raw_lines
 
     # ---- Line 1: P<COUNTRY SURNAME<<GIVEN<NAMES<<<<... ----
     result.document_type = l1[0:2].replace("<", "")
@@ -149,7 +152,7 @@ def parse_td3(line1: str, line2: str) -> MRZResult:
 
 if __name__ == "__main__":
     # Known-good ICAO sample MRZ (from Doc 9303 worked examples)
-    l1 = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<"
+    l1 = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<"
     l2 = "L898902C36UTO7408122F1204159ZE184226B<<<<<10"
     r = parse_td3(l1, l2)
     print("Overall valid:", r.overall_valid)
