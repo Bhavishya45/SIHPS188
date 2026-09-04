@@ -5,7 +5,7 @@ This prototype has two parts. Both are real, not mocked demos.
 
 ## 1. `dashboard.html` — Officer investigation console
 
-Open it in any browser to review the three embedded demonstration cases. To run a new document through OCR, MRZ validation, ELA, and the prototype face/reuse pipeline, start the local backend first.
+Open it in any browser to begin with an empty investigation workspace. To run a new document through OCR, MRZ validation, ELA, and the prototype face/reuse pipeline, start the local backend first. Each successful screening adds a report to the case queue for that browser session.
 
 - **Case queue** on the left shows 3 documents that were run through the actual
   Python backend (`backend/`) — the OCR extraction, MRZ checksum validation,
