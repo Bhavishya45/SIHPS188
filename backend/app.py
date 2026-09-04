@@ -14,10 +14,12 @@ import base64
 import io
 import json
 import os
+import tempfile
+import threading
 import time
 
 from flask import Flask, request, jsonify
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 import mrz
 import ocr
@@ -26,21 +28,35 @@ import face_match
 import risk_engine
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB demo upload limit
+Image.MAX_IMAGE_PIXELS = 20_000_000
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "cases_db.json")
 REUSE_HAMMING_THRESHOLD = 8  # out of 64 bits -> "same face" for aHash
+DB_LOCK = threading.Lock()
 
 
 def _load_db():
     if os.path.exists(DB_PATH):
-        with open(DB_PATH) as f:
-            return json.load(f)
+        try:
+            with open(DB_PATH, encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, list) else []
+        except (OSError, json.JSONDecodeError):
+            return []
     return []
 
 
 def _save_db(db):
-    with open(DB_PATH, "w") as f:
-        json.dump(db, f, indent=2)
+    directory = os.path.dirname(DB_PATH)
+    fd, temp_path = tempfile.mkstemp(dir=directory, prefix="cases_", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(db, f, indent=2)
+        os.replace(temp_path, DB_PATH)
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
 
 
 def _pil_to_data_url(image: Image.Image) -> str:
@@ -67,7 +83,8 @@ def run_pipeline(document_image: Image.Image, live_photo: Image.Image, claimed_n
 
     # 3. Face match + identity reuse -------------------------------------
     doc_face = face_match.detect_face(document_image, fallback_box=_default_photo_box(document_image))
-    db = _load_db()
+    with DB_LOCK:
+        db = _load_db()
 
     face_score = None
     if live_photo is not None:
@@ -82,23 +99,33 @@ def run_pipeline(document_image: Image.Image, live_photo: Image.Image, claimed_n
         for case in db:
             if case.get("name") == claimed_name:
                 continue
-            dist = face_match.hamming_distance(doc_hash, case["face_hash"])
+            stored_hash = case.get("face_hash")
+            if not stored_hash:
+                continue
+            dist = face_match.hamming_distance(doc_hash, stored_hash)
             if dist <= REUSE_HAMMING_THRESHOLD:
                 identity_reuse = True
                 reuse_names.append(case["name"])
 
     # 4. Risk score --------------------------------------------------------
     report = risk_engine.compute_risk(mrz_result, tamper_result, face_score, identity_reuse, reuse_names)
+    if not doc_face.found and doc_face.array is not None:
+        report.reasons.append(
+            "Portrait was not detected; the prototype used its layout fallback for reuse comparison"
+        )
 
     # Persist this case for future reuse checks
     if doc_hash:
-        db.append({
+        case_record = {
             "name": claimed_name or mrz_result.surname or "UNKNOWN",
             "face_hash": doc_hash,
             "passport_number": mrz_result.passport_number,
             "timestamp": time.time(),
-        })
-        _save_db(db)
+        }
+        with DB_LOCK:
+            db = _load_db()
+            db.append(case_record)
+            _save_db(db)
 
     elapsed_ms = round((time.time() - t0) * 1000)
 
@@ -134,6 +161,7 @@ def run_pipeline(document_image: Image.Image, live_photo: Image.Image, claimed_n
         },
         "face": {
             "doc_face_found": doc_face.found,
+            "evidence_quality": "detected" if doc_face.found else "layout fallback - not a detected face",
             "match_score": round(face_score, 1) if face_score is not None else None,
             "identity_reuse": identity_reuse,
             "reuse_matched_names": reuse_names,
@@ -159,14 +187,34 @@ def analyze():
     if "document_image" not in request.files:
         return jsonify({"error": "document_image file is required"}), 400
 
-    document_image = Image.open(request.files["document_image"].stream)
+    try:
+        document_image = Image.open(request.files["document_image"].stream)
+        document_image.load()
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError):
+        return jsonify({"error": "document_image must be a valid, reasonably sized image"}), 400
     live_photo = None
     if "live_photo" in request.files and request.files["live_photo"].filename:
-        live_photo = Image.open(request.files["live_photo"].stream)
+        try:
+            live_photo = Image.open(request.files["live_photo"].stream)
+            live_photo.load()
+        except (UnidentifiedImageError, OSError, Image.DecompressionBombError):
+            return jsonify({"error": "live_photo must be a valid, reasonably sized image"}), 400
 
     claimed_name = request.form.get("name", "")
-    result = run_pipeline(document_image, live_photo, claimed_name)
+    result = run_pipeline(document_image, live_photo, claimed_name.strip()[:120])
     return jsonify(result)
+
+
+@app.after_request
+def add_demo_headers(response):
+    """Allow the standalone demonstration dashboard to call localhost."""
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    return response
+
+
+@app.errorhandler(413)
+def upload_too_large(_error):
+    return jsonify({"error": "Upload is too large; the demonstration limit is 10 MB"}), 413
 
 
 @app.route("/api/cases", methods=["GET"])

@@ -78,4 +78,6 @@ def perceptual_hash(a: np.ndarray, hash_size: int = 8) -> str:
 
 
 def hamming_distance(hash_a: str, hash_b: str) -> int:
+    if len(hash_a) != len(hash_b):
+        raise ValueError("Face hashes must be the same length")
     return sum(c1 != c2 for c1, c2 in zip(hash_a, hash_b))
